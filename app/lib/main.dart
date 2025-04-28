@@ -15,7 +15,6 @@ class MyApp extends StatelessWidget {
   }
 }
 
-
 class StepCounterPage extends StatefulWidget {
   const StepCounterPage({super.key});
   @override
@@ -25,14 +24,17 @@ class StepCounterPage extends StatefulWidget {
 class _StepCounterPageState extends State<StepCounterPage> {
   late Stream<StepCount> _stepCountStream;
   StreamSubscription<StepCount>? _stepCountSubscription;
+  Timer? _checkTimer;
   int _steps = 0;
   int? _initialSteps;
   DateTime? _startTime;
+  DateTime? _lastStepTime;
 
   @override
   void initState() {
     super.initState();
-    requestPermission(); // 권한 요청 먼저
+    requestPermission();
+    startCheckingMovement();
   }
 
   Future<void> requestPermission() async {
@@ -62,9 +64,7 @@ class _StepCounterPageState extends State<StepCounterPage> {
     }
   }
 
-
   void startPedometer() {
-    // 이전 스트림 있으면 정리
     _stepCountSubscription?.cancel();
 
     _stepCountStream = Pedometer.stepCountStream;
@@ -74,6 +74,7 @@ class _StepCounterPageState extends State<StepCounterPage> {
       cancelOnError: true,
     );
     _startTime = DateTime.now();
+    _lastStepTime = DateTime.now();
   }
 
   void onStepCount(StepCount event) {
@@ -83,6 +84,7 @@ class _StepCounterPageState extends State<StepCounterPage> {
 
     setState(() {
       _steps = event.steps - _initialSteps!;
+      _lastStepTime = DateTime.now();
     });
   }
 
@@ -98,9 +100,24 @@ class _StepCounterPageState extends State<StepCounterPage> {
     if (_startTime == null || _steps == 0) return 0;
     final duration = DateTime.now().difference(_startTime!).inSeconds;
     if (duration == 0) return 0;
-    double stepLength = 0.7; // 평균 보폭
+    double stepLength = 0.7;
     double distance = _steps * stepLength;
-    return distance / duration; // m/s
+    return distance / duration;
+  }
+
+  void startCheckingMovement() {
+    _checkTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_lastStepTime != null) {
+        final diff = DateTime.now().difference(_lastStepTime!).inSeconds;
+        if (diff >= 3) {
+
+          setState(() {
+            _steps = 0;
+            _startTime = DateTime.now();
+          });
+        }
+      }
+    });
   }
 
   @override
@@ -118,9 +135,11 @@ class _StepCounterPageState extends State<StepCounterPage> {
       ),
     );
   }
+
   @override
   void dispose() {
     _stepCountSubscription?.cancel();
+    _checkTimer?.cancel();
     super.dispose();
   }
 }
