@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:pedometer/pedometer.dart';
+import 'package:sensors_plus/sensors_plus.dart'; // 가속도 센서 사용
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:async';
+import 'dart:math';
 
 void main() => runApp(const MyApp());
 
@@ -24,17 +26,23 @@ class StepCounterPage extends StatefulWidget {
 class _StepCounterPageState extends State<StepCounterPage> {
   late Stream<StepCount> _stepCountStream;
   StreamSubscription<StepCount>? _stepCountSubscription;
+  StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
   Timer? _checkTimer;
+
   int _steps = 0;
   int? _initialSteps;
+  int? _previousSteps;
   DateTime? _startTime;
-  DateTime? _lastStepTime;
+  DateTime? _lastMovementTime; // 마지막 움직임 기록
+
+  bool _isMoving = false; // 움직임 감지 상태
+
+  static const double movementThreshold = 1.5; // 움직임 감지 기준 (가속도 값)
 
   @override
   void initState() {
     super.initState();
     requestPermission();
-    startCheckingMovement();
   }
 
   Future<void> requestPermission() async {
@@ -45,13 +53,15 @@ class _StepCounterPageState extends State<StepCounterPage> {
 
     if (status.isGranted) {
       startPedometer();
+      startAccelerometer();
+      startCheckingMovement();
     } else {
       if (context.mounted) {
         showDialog(
           context: context,
           builder: (_) => AlertDialog(
             title: const Text('권한 필요'),
-            content: const Text('걸음 측정을 위해 권한이 필요합니다. 설정에서 권한을 허용해 주세요.'),
+            content: const Text('걸음 측정을 위해 권한을 허용해 주세요.'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
@@ -66,25 +76,52 @@ class _StepCounterPageState extends State<StepCounterPage> {
 
   void startPedometer() {
     _stepCountSubscription?.cancel();
-
     _stepCountStream = Pedometer.stepCountStream;
     _stepCountSubscription = _stepCountStream.listen(
       onStepCount,
       onError: onStepCountError,
       cancelOnError: true,
     );
-    _startTime = DateTime.now();
-    _lastStepTime = DateTime.now();
+  }
+
+  void startAccelerometer() {
+    _accelerometerSubscription?.cancel();
+    _accelerometerSubscription = accelerometerEvents.listen((AccelerometerEvent event) {
+      double totalAcceleration = sqrt(event.x * event.x + event.y * event.y + event.z * event.z);
+      double movement = (totalAcceleration - 9.8).abs();
+
+      if (movement > movementThreshold) {
+        // 움직임이 감지되면 마지막 움직임 시간 업데이트
+        _lastMovementTime = DateTime.now();
+        if (!_isMoving) {
+          setState(() {
+            _isMoving = true;
+          });
+          debugPrint("움직임 감지!");
+        }
+      }
+    });
   }
 
   void onStepCount(StepCount event) {
     debugPrint("걸음 수 이벤트 발생: ${event.steps}");
 
-    _initialSteps ??= event.steps;
+    if (_initialSteps == null) {
+      _initialSteps = event.steps;
+      _previousSteps = event.steps;
+      _startTime = DateTime.now();
+      _lastMovementTime = DateTime.now();
+      setState(() {});
+      return;
+    }
 
     setState(() {
-      _steps = event.steps - _initialSteps!;
-      _lastStepTime = DateTime.now();
+      int stepDelta = event.steps - (_previousSteps ?? event.steps);
+      if (stepDelta > 0) {
+        _steps += stepDelta;
+      }
+      _previousSteps = event.steps;
+      _lastMovementTime = DateTime.now();
     });
   }
 
@@ -100,21 +137,20 @@ class _StepCounterPageState extends State<StepCounterPage> {
     if (_startTime == null || _steps == 0) return 0;
     final duration = DateTime.now().difference(_startTime!).inSeconds;
     if (duration == 0) return 0;
-    double stepLength = 0.7;
+    double stepLength = 0.7; // 평균 보폭 (m)
     double distance = _steps * stepLength;
-    return distance / duration;
+    return distance / duration; // m/s
   }
 
   void startCheckingMovement() {
-    _checkTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_lastStepTime != null) {
-        final diff = DateTime.now().difference(_lastStepTime!).inSeconds;
-        if (diff >= 3) {
-
+    _checkTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+      if (_lastMovementTime != null) {
+        final diff = DateTime.now().difference(_lastMovementTime!).inMilliseconds;
+        if (diff >= 1500 && _isMoving) {
           setState(() {
-            _steps = 0;
-            _startTime = DateTime.now();
+            _isMoving = false;
           });
+          debugPrint("정지 감지!");
         }
       }
     });
@@ -128,8 +164,11 @@ class _StepCounterPageState extends State<StepCounterPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text('걸음 수: $_steps'),
-            Text('추정 속도: ${getSpeed().toStringAsFixed(2)} m/s'),
+            Text(_isMoving ? '움직이는 중' : '정지 상태', style: const TextStyle(fontSize: 20)),
+            const SizedBox(height: 20),
+            Text('걸음 수: $_steps', style: const TextStyle(fontSize: 20)),
+            const SizedBox(height: 10),
+            Text('추정 속도: ${getSpeed().toStringAsFixed(2)} m/s', style: const TextStyle(fontSize: 20)),
           ],
         ),
       ),
@@ -139,6 +178,7 @@ class _StepCounterPageState extends State<StepCounterPage> {
   @override
   void dispose() {
     _stepCountSubscription?.cancel();
+    _accelerometerSubscription?.cancel();
     _checkTimer?.cancel();
     super.dispose();
   }

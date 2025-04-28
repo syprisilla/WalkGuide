@@ -13,6 +13,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   pedometer: ^4.0.1
   permission_handler: ^11.0.1
+  sensors_plus: ^3.0.0   # ← 이 줄 추가!
 
 dev_dependencies:
   flutter_test:
