@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:pedometer/pedometer.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'dart:async';
 
 void main() => runApp(const MyApp());
 
@@ -14,6 +15,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
+
 class StepCounterPage extends StatefulWidget {
   const StepCounterPage({super.key});
   @override
@@ -22,6 +24,7 @@ class StepCounterPage extends StatefulWidget {
 
 class _StepCounterPageState extends State<StepCounterPage> {
   late Stream<StepCount> _stepCountStream;
+  StreamSubscription<StepCount>? _stepCountSubscription;
   int _steps = 0;
   int? _initialSteps;
   DateTime? _startTime;
@@ -35,16 +38,41 @@ class _StepCounterPageState extends State<StepCounterPage> {
   Future<void> requestPermission() async {
     var status = await Permission.activityRecognition.status;
     if (!status.isGranted) {
-      await Permission.activityRecognition.request();
+      status = await Permission.activityRecognition.request();
     }
 
-
-    startPedometer();
+    if (status.isGranted) {
+      startPedometer();
+    } else {
+      if (context.mounted) {
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('권한 필요'),
+            content: const Text('걸음 측정을 위해 권한이 필요합니다. 설정에서 권한을 허용해 주세요.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('확인'),
+              ),
+            ],
+          ),
+        );
+      }
+    }
   }
 
+
   void startPedometer() {
+    // 이전 스트림 있으면 정리
+    _stepCountSubscription?.cancel();
+
     _stepCountStream = Pedometer.stepCountStream;
-    _stepCountStream.listen(onStepCount).onError(onStepCountError);
+    _stepCountSubscription = _stepCountStream.listen(
+      onStepCount,
+      onError: onStepCountError,
+      cancelOnError: true,
+    );
     _startTime = DateTime.now();
   }
 
@@ -60,6 +88,10 @@ class _StepCounterPageState extends State<StepCounterPage> {
 
   void onStepCountError(error) {
     debugPrint('걸음 수 측정 오류: $error');
+    Future.delayed(const Duration(seconds: 2), () {
+      debugPrint('걸음 측정 재시도');
+      startPedometer();
+    });
   }
 
   double getSpeed() {
@@ -85,5 +117,10 @@ class _StepCounterPageState extends State<StepCounterPage> {
         ),
       ),
     );
+  }
+  @override
+  void dispose() {
+    _stepCountSubscription?.cancel();
+    super.dispose();
   }
 }
