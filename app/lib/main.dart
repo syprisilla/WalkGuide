@@ -149,8 +149,12 @@ class _StepCounterPageState extends State<StepCounterPage> {
         if (diff >= 1500 && _isMoving) {
           setState(() {
             _isMoving = false;
+            _steps = 0;
+            _initialSteps = null;
+            _previousSteps = null;
+            _startTime = null;
           });
-          debugPrint("정지 감지!");
+          debugPrint("정지 감지 → 걸음 수 초기화!");
         }
       }
     });
