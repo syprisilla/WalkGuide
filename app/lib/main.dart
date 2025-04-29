@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:pedometer/pedometer.dart';
-import 'package:sensors_plus/sensors_plus.dart'; // 가속도 센서 사용
+import 'package:sensors_plus/sensors_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:async';
 import 'dart:math';
@@ -33,11 +33,13 @@ class _StepCounterPageState extends State<StepCounterPage> {
   int? _initialSteps;
   int? _previousSteps;
   DateTime? _startTime;
-  DateTime? _lastMovementTime; // 마지막 움직임 기록
+  DateTime? _lastMovementTime;
 
-  bool _isMoving = false; // 움직임 감지 상태
+  bool _isMoving = false;
 
-  static const double movementThreshold = 1.5; // 움직임 감지 기준 (가속도 값)
+  List<DateTime> _recentSteps = [];
+
+  static const double movementThreshold = 1.5;
 
   @override
   void initState() {
@@ -91,7 +93,6 @@ class _StepCounterPageState extends State<StepCounterPage> {
       double movement = (totalAcceleration - 9.8).abs();
 
       if (movement > movementThreshold) {
-        // 움직임이 감지되면 마지막 움직임 시간 업데이트
         _lastMovementTime = DateTime.now();
         if (!_isMoving) {
           setState(() {
@@ -111,6 +112,7 @@ class _StepCounterPageState extends State<StepCounterPage> {
       _previousSteps = event.steps;
       _startTime = DateTime.now();
       _lastMovementTime = DateTime.now();
+      _recentSteps.clear();
       setState(() {});
       return;
     }
@@ -119,6 +121,10 @@ class _StepCounterPageState extends State<StepCounterPage> {
       int stepDelta = event.steps - (_previousSteps ?? event.steps);
       if (stepDelta > 0) {
         _steps += stepDelta;
+        // stepDelta만큼 걸음 이벤트 기록
+        for (int i = 0; i < stepDelta; i++) {
+          _recentSteps.add(DateTime.now());
+        }
       }
       _previousSteps = event.steps;
       _lastMovementTime = DateTime.now();
@@ -133,13 +139,27 @@ class _StepCounterPageState extends State<StepCounterPage> {
     });
   }
 
-  double getSpeed() {
+  double getAverageSpeed() {
     if (_startTime == null || _steps == 0) return 0;
     final duration = DateTime.now().difference(_startTime!).inSeconds;
     if (duration == 0) return 0;
-    double stepLength = 0.7; // 평균 보폭 (m)
+    double stepLength = 0.7;
     double distance = _steps * stepLength;
     return distance / duration; // m/s
+  }
+
+  double getRealTimeSpeed() {
+    if (_recentSteps.isEmpty) return 0;
+
+    DateTime now = DateTime.now();
+    _recentSteps = _recentSteps.where((t) => now.difference(t).inSeconds <= 3).toList();
+
+    int stepsInLast3Seconds = _recentSteps.length;
+
+    double stepLength = 0.7;
+    double distance = stepsInLast3Seconds * stepLength;
+
+    return distance / 3; // 최근 3초 이동 거리 ÷ 3초
   }
 
   void startCheckingMovement() {
@@ -153,6 +173,7 @@ class _StepCounterPageState extends State<StepCounterPage> {
             _initialSteps = null;
             _previousSteps = null;
             _startTime = null;
+            _recentSteps.clear();
           });
           debugPrint("정지 감지 → 걸음 수 초기화!");
         }
@@ -172,7 +193,9 @@ class _StepCounterPageState extends State<StepCounterPage> {
             const SizedBox(height: 20),
             Text('걸음 수: $_steps', style: const TextStyle(fontSize: 20)),
             const SizedBox(height: 10),
-            Text('추정 속도: ${getSpeed().toStringAsFixed(2)} m/s', style: const TextStyle(fontSize: 20)),
+            Text('전체 평균 속도: ${getAverageSpeed().toStringAsFixed(2)} m/s', style: const TextStyle(fontSize: 20)),
+            const SizedBox(height: 10),
+            Text('실시간 속도(최근 3초): ${getRealTimeSpeed().toStringAsFixed(2)} m/s', style: const TextStyle(fontSize: 20)),
           ],
         ),
       ),
